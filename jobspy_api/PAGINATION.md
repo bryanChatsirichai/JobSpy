@@ -17,10 +17,10 @@ From the repo root (`JobSpy/`):
 ### Start the server
 
 ```bash
-uv run uvicorn jobspy_api.main:app --host 0.0.0.0 --port 8001
+uv run python -m jobspy_api
 ```
 
-Use the same port as `JOBSPY_PORT` in `.env` (default **8001**) so clients and docs stay aligned.
+Uses `JOBSPY_HOST` (default **0.0.0.0**) and `JOBSPY_PORT` (default **8001**) from `.env`. Bind `0.0.0.0` so other machines can call `http://<your-ip>:8001/v1/jobs/search?page=0`.
 
 The process runs until you stop it (Ctrl+C). Scrapes run inside request handlers and can take a while per call.
 
@@ -47,8 +47,8 @@ Routes are registered **twice** (with and without `/v1`). Use either prefix; beh
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `page` | int ≥ 0 | `0` | 0-based index into `JOBSPY_SEARCH_TERMS` |
-| `results_wanted` | int 1–1000 | `JOBSPY_RESULTS_WANTED` from `.env` | Max jobs **per site** for this term |
-| `hours_old` | int ≥ 1 | `JOBSPY_HOURS_OLD` from `.env` | Only jobs posted within this many hours |
+
+All scrape settings (`JOBSPY_SITE_NAMES`, `JOBSPY_LOCATION`, `JOBSPY_COUNTRY`, `JOBSPY_RESULTS_WANTED`, `JOBSPY_HOURS_OLD`, `JOBSPY_SEARCH_TERMS`) come from `.env` only — do not pass them as query parameters.
 
 #### Example requests
 
@@ -58,7 +58,7 @@ GET http://localhost:8001/v1/health
 
 ```http
 GET http://localhost:8001/v1/jobs/search?page=0
-GET http://localhost:8001/v1/jobs/search?page=0&results_wanted=50&hours_old=504
+GET http://localhost:8001/v1/jobs/search?page=1
 ```
 
 #### Example success response (`/jobs/search`)
@@ -150,8 +150,8 @@ Same behavior in `scrape_sg_original.py` and `scrape_sg.py`: each loop iteration
 ### Example: sweep all terms
 
 ```http
-GET /jobs/search?page=0&results_wanted=50
-GET /jobs/search?page=1&results_wanted=50
+GET /jobs/search?page=0
+GET /jobs/search?page=1
 …
 ```
 
@@ -189,9 +189,8 @@ Example: 5 sites × `results_wanted=5` → up to ~25 raw rows per API call, befo
 |--------|---------|
 | Hardcoded `RESULTS_WANTED = 5` in `scrape_sg_original.py` | Original standalone script only |
 | `JOBSPY_RESULTS_WANTED` in `.env` (default `5`) | API + `scrape_sg.py` |
-| Query param `?results_wanted=N` on `/jobs/search` (1–1000) | API only; overrides env when provided |
 
-Related: `hours_old` / `JOBSPY_HOURS_OLD` filters by job age (default 504 h = 3 weeks).
+Related: `JOBSPY_HOURS_OLD` filters by job age (default 504 h = 3 weeks). Both are read from `.env` for API requests.
 
 ---
 
@@ -202,17 +201,17 @@ Related: `hours_old` / `JOBSPY_HOURS_OLD` filters by job age (default 504 h = 3 
 | Terms per run | All terms in a loop | All terms (CLI) | One term per request (`page`) |
 | Sites per term | All `SITE_NAMES` together | All `SITE_NAMES` together | All `JOBSPY_SITE_NAMES` together |
 | Output shape | One CSV, mixed sites | One CSV, mixed sites | One JSON `jobs` array, mixed sites |
-| `results_wanted` | Constant in file | `--results-wanted` or `.env` | Query param or `.env` |
+| `results_wanted` | Constant in file | `--results-wanted` or `.env` | `.env` only |
 | Job-board pages | JobSpy internal | JobSpy internal | JobSpy internal |
 
 ---
 
 ## Tuning examples
 
-**More jobs per site for one term (API):**
+**More jobs per site for one term (API):** set in `.env`:
 
-```http
-GET /jobs/search?page=0&results_wanted=200
+```env
+JOBSPY_RESULTS_WANTED=200
 ```
 
 **Scrape fewer boards (env — affects API and `scrape_sg.py`):**

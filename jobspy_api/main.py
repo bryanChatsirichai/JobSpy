@@ -1,4 +1,4 @@
-"""JobSpy FastAPI sidecar — run with ``uv run uvicorn jobspy_api.main:app --port 8001``."""
+"""JobSpy FastAPI sidecar — run with ``uv run python -m jobspy_api`` (see ``.env``)."""
 
 from __future__ import annotations
 

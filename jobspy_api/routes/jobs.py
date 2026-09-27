@@ -62,8 +62,6 @@ def health() -> dict[str, str]:
 @router.get("/jobs/search")
 async def search_jobs(
     page: int = Query(0, ge=0, description="0-based search term index"),
-    results_wanted: int | None = Query(None, ge=1, le=1000),
-    hours_old: int | None = Query(None, ge=1),
 ) -> dict:
     total_terms = len(config.SEARCH_TERMS)
     if page >= total_terms:
@@ -77,15 +75,13 @@ async def search_jobs(
         }
 
     term = config.SEARCH_TERMS[page]
-    wanted = results_wanted if results_wanted is not None else config.RESULTS_WANTED
-    hours = hours_old if hours_old is not None else config.HOURS_OLD
 
     try:
         jobs = await asyncio.to_thread(
             _scrape_term,
             term,
-            results_wanted=wanted,
-            hours_old=hours,
+            results_wanted=config.RESULTS_WANTED,
+            hours_old=config.HOURS_OLD,
         )
     except Exception:
         logger.exception("Scrape failed for page=%s term=%s", page, config.display_term(term))

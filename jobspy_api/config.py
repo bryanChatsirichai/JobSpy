@@ -74,6 +74,7 @@ LOCATION: str = os.getenv("JOBSPY_LOCATION", "Singapore")
 COUNTRY: str = os.getenv("JOBSPY_COUNTRY", "singapore")
 RESULTS_WANTED: int = int(os.getenv("JOBSPY_RESULTS_WANTED", "5"))
 HOURS_OLD: int = int(os.getenv("JOBSPY_HOURS_OLD", "504"))
+HOST: str = os.getenv("JOBSPY_HOST", "0.0.0.0")
 PORT: int = int(os.getenv("JOBSPY_PORT", "8001"))
 
 _search_terms_env = os.getenv("JOBSPY_SEARCH_TERMS")
