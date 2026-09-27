@@ -149,7 +149,12 @@ def scrape_jobs(
 
             # Handle compensation
             compensation_obj = job_data.get("compensation")
-            if compensation_obj and isinstance(compensation_obj, dict):
+            has_direct_salary = (
+                compensation_obj
+                and isinstance(compensation_obj, dict)
+                and compensation_obj.get("min_amount") is not None
+            )
+            if has_direct_salary:
                 job_data["interval"] = (
                     compensation_obj.get("interval").value
                     if compensation_obj.get("interval")
@@ -167,16 +172,16 @@ def scrape_jobs(
                 ):
                     convert_to_annual(job_data)
             else:
-                if country_enum == Country.USA:
-                    (
-                        job_data["interval"],
-                        job_data["min_amount"],
-                        job_data["max_amount"],
-                        job_data["currency"],
-                    ) = extract_salary(
-                        job_data["description"],
-                        enforce_annual_salary=enforce_annual_salary,
-                    )
+                (
+                    job_data["interval"],
+                    job_data["min_amount"],
+                    job_data["max_amount"],
+                    job_data["currency"],
+                ) = extract_salary(
+                    job_data["description"],
+                    enforce_annual_salary=enforce_annual_salary,
+                )
+                if job_data["min_amount"] is not None:
                     job_data["salary_source"] = SalarySource.DESCRIPTION.value
 
             job_data["salary_source"] = (

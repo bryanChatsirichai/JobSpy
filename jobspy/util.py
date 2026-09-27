@@ -208,6 +208,88 @@ def remove_attributes(tag):
     return tag
 
 
+def _salary_currency_from_text(text: str) -> str:
+    if re.search(r"S\$|SGD", text, re.IGNORECASE):
+        return "SGD"
+    return "USD"
+
+
+def _salary_interval_from_context(context: str) -> str | None:
+    ctx = context.lower()
+    if re.search(r"per\s+hour|/hour|\bhourly\b", ctx):
+        return CompensationInterval.HOURLY.value
+    if re.search(r"per\s+month|/month|\bmonthly\b", ctx):
+        return CompensationInterval.MONTHLY.value
+    if re.search(
+        r"per\s+year|per\s+annum|per\s+annually|/year|\bannually\b|p\.?\s*a\.?",
+        ctx,
+    ):
+        return CompensationInterval.YEARLY.value
+    return None
+
+
+def _salary_range_to_result(
+    min_salary: int,
+    max_salary: int,
+    *,
+    context: str,
+    currency: str,
+    lower_limit: int,
+    upper_limit: int,
+    hourly_threshold: int,
+    monthly_threshold: int,
+    enforce_annual_salary: bool,
+) -> tuple[str | None, int | None, int | None, str | None]:
+    def convert_hourly_to_annual(hourly_wage: int) -> int:
+        return hourly_wage * 2080
+
+    def convert_monthly_to_annual(monthly_wage: int) -> int:
+        return monthly_wage * 12
+
+    interval_override = _salary_interval_from_context(context)
+    annual_max_salary: int | None = None
+
+    if interval_override == CompensationInterval.HOURLY.value:
+        interval = CompensationInterval.HOURLY.value
+        annual_min_salary = convert_hourly_to_annual(min_salary)
+        annual_max_salary = convert_hourly_to_annual(max_salary)
+    elif interval_override == CompensationInterval.MONTHLY.value:
+        interval = CompensationInterval.MONTHLY.value
+        annual_min_salary = convert_monthly_to_annual(min_salary)
+        annual_max_salary = convert_monthly_to_annual(max_salary)
+    elif interval_override == CompensationInterval.YEARLY.value:
+        interval = CompensationInterval.YEARLY.value
+        annual_min_salary = min_salary
+        annual_max_salary = max_salary
+    elif min_salary < hourly_threshold:
+        interval = CompensationInterval.HOURLY.value
+        annual_min_salary = convert_hourly_to_annual(min_salary)
+        if max_salary < hourly_threshold:
+            annual_max_salary = convert_hourly_to_annual(max_salary)
+    elif min_salary < monthly_threshold:
+        interval = CompensationInterval.MONTHLY.value
+        annual_min_salary = convert_monthly_to_annual(min_salary)
+        if max_salary < monthly_threshold:
+            annual_max_salary = convert_monthly_to_annual(max_salary)
+    else:
+        interval = CompensationInterval.YEARLY.value
+        annual_min_salary = min_salary
+        annual_max_salary = max_salary
+
+    if annual_max_salary is None:
+        return None, None, None, None
+    if not (
+        lower_limit <= annual_min_salary <= upper_limit
+        and lower_limit <= annual_max_salary <= upper_limit
+        and annual_min_salary <= annual_max_salary
+    ):
+        return None, None, None, None
+
+    if enforce_annual_salary:
+        return interval, annual_min_salary, annual_max_salary, currency
+    return interval, min_salary, max_salary, currency
+
+
 def extract_salary(
     salary_str,
     lower_limit=1000,
@@ -223,58 +305,48 @@ def extract_salary(
     if not salary_str:
         return None, None, None, None
 
-    annual_max_salary = None
-    min_max_pattern = r"\$(\d+(?:,\d+)?(?:\.\d+)?)([kK]?)\s*[-—–]\s*(?:\$)?(\d+(?:,\d+)?(?:\.\d+)?)([kK]?)"
-
-    def to_int(s):
+    def to_int(s: str) -> int:
         return int(float(s.replace(",", "")))
 
-    def convert_hourly_to_annual(hourly_wage):
-        return hourly_wage * 2080
+    def apply_k(amount: int, suffix: str) -> int:
+        return amount * 1000 if suffix and "k" in suffix.lower() else amount
 
-    def convert_monthly_to_annual(monthly_wage):
-        return monthly_wage * 12
+    currency_prefix = r"(?:S\$|SGD\s*|\$)\s*"
+    amount = r"(\d+(?:,\d+)?(?:\.\d+)?)([kK]?)"
+    min_max_pattern = (
+        rf"{currency_prefix}{amount}\s*[-—–]\s*(?:S\$|SGD\s*|\$)?\s*{amount}"
+    )
+    from_pattern = rf"(?:from|up\s+to)\s+{currency_prefix}{amount}"
 
-    match = re.search(min_max_pattern, salary_str)
+    for pattern, single_value in ((min_max_pattern, False), (from_pattern, True)):
+        match = re.search(pattern, salary_str, re.IGNORECASE)
+        if not match:
+            continue
 
-    if match:
-        min_salary = to_int(match.group(1))
-        max_salary = to_int(match.group(3))
-        # Handle 'k' suffix for min and max salaries independently
-        if "k" in match.group(2).lower() or "k" in match.group(4).lower():
-            min_salary *= 1000
-            max_salary *= 1000
-
-        # Convert to annual if less than the hourly threshold
-        if min_salary < hourly_threshold:
-            interval = CompensationInterval.HOURLY.value
-            annual_min_salary = convert_hourly_to_annual(min_salary)
-            if max_salary < hourly_threshold:
-                annual_max_salary = convert_hourly_to_annual(max_salary)
-
-        elif min_salary < monthly_threshold:
-            interval = CompensationInterval.MONTHLY.value
-            annual_min_salary = convert_monthly_to_annual(min_salary)
-            if max_salary < monthly_threshold:
-                annual_max_salary = convert_monthly_to_annual(max_salary)
-
+        min_salary = apply_k(to_int(match.group(1)), match.group(2))
+        if single_value:
+            max_salary = min_salary
         else:
-            interval = CompensationInterval.YEARLY.value
-            annual_min_salary = min_salary
-            annual_max_salary = max_salary
+            max_salary = apply_k(to_int(match.group(3)), match.group(4))
 
-        # Ensure salary range is within specified limits
-        if not annual_max_salary:
-            return None, None, None, None
-        if (
-            lower_limit <= annual_min_salary <= upper_limit
-            and lower_limit <= annual_max_salary <= upper_limit
-            and annual_min_salary < annual_max_salary
-        ):
-            if enforce_annual_salary:
-                return interval, annual_min_salary, annual_max_salary, "USD"
-            else:
-                return interval, min_salary, max_salary, "USD"
+        context_end = min(len(salary_str), match.end() + 80)
+        context = salary_str[match.start() : context_end]
+        currency = _salary_currency_from_text(match.group(0))
+
+        result = _salary_range_to_result(
+            min_salary,
+            max_salary,
+            context=context,
+            currency=currency,
+            lower_limit=lower_limit,
+            upper_limit=upper_limit,
+            hourly_threshold=hourly_threshold,
+            monthly_threshold=monthly_threshold,
+            enforce_annual_salary=enforce_annual_salary,
+        )
+        if result[1] is not None:
+            return result
+
     return None, None, None, None
 
 

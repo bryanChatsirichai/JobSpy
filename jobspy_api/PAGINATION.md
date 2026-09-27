@@ -70,6 +70,13 @@ GET http://localhost:8001/v1/jobs/search?page=1
   "search_term": "(all jobs)",
   "total_terms": 29,
   "has_more": true,
+  "site_counts": {
+    "indeed": 5,
+    "linkedin": 5,
+    "glassdoor": 0,
+    "google": 0,
+    "bayt": 0
+  },
   "jobs": [
     {
       "site": "indeed",
@@ -82,7 +89,9 @@ GET http://localhost:8001/v1/jobs/search?page=1
 }
 ```
 
-On scrape failure, `success` is `false` and `jobs` is `[]`. When `page` is past the last term, `success` is `true`, `search_term` is `null`, `has_more` is `false`, and `jobs` is `[]`.
+`site_counts` lists jobs returned **per board** for this request (before merge/dedup). Keys and order follow `JOBSPY_SITE_NAMES` in `.env`; missing boards are always `0`.
+
+On scrape failure, `success` is `false`, `jobs` is `[]`, and `site_counts` is all zeros. When `page` is past the last term, `success` is `true`, `search_term` is `null`, `has_more` is `false`, `jobs` is `[]`, and `site_counts` is all zeros.
 
 CORS is enabled for `GET` from any origin (portal-friendly).
 

@@ -17,31 +17,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _empty_site_counts() -> dict[str, int]:
+    return {site: 0 for site in config.SITE_NAMES}
+
+
 def _scrape_term(
     term: str | None,
     *,
     results_wanted: int,
     hours_old: int,
-) -> list[dict]:
-    """Run scrape_jobs for a single search term (blocking)."""
+) -> tuple[list[dict], dict[str, int]]:
+    """Run scrape_jobs per configured site (blocking)."""
     label = config.display_term(term)
-    logger.info("Scraping search term: %s", label)
+    logger.info("Scraping search term: %s (sites=%s)", label, config.SITE_NAMES)
 
-    df = scrape_jobs(
-        site_name=config.SITE_NAMES,
-        search_term=term,
-        google_search_term=config.google_query(term),
-        location=config.LOCATION,
-        country_indeed=config.COUNTRY,
-        results_wanted=results_wanted,
-        hours_old=hours_old,
-        verbose=1,
-    )
+    site_counts = _empty_site_counts()
+    frames: list[pd.DataFrame] = []
 
-    if df.empty:
-        logger.info("No jobs for term: %s", label)
-        return []
+    for site in config.SITE_NAMES:
+        df = scrape_jobs(
+            site_name=[site],
+            search_term=term,
+            google_search_term=config.google_query(term),
+            location=config.LOCATION,
+            country_indeed=config.COUNTRY,
+            results_wanted=results_wanted,
+            hours_old=hours_old,
+            verbose=1,
+        )
+        site_counts[site] = len(df)
+        if not df.empty:
+            frames.append(df)
 
+    if not frames:
+        logger.info("No jobs for term: %s site_counts=%s", label, site_counts)
+        return [], site_counts
+
+    df = pd.concat(frames, ignore_index=True)
     df = df.drop_duplicates(subset=["job_url"], keep="first")
     df["search_term"] = label
     records = df.replace({np.nan: None}).to_dict(orient="records")
@@ -50,8 +62,13 @@ def _scrape_term(
         if record.get("date_posted") is not None:
             record["date_posted"] = str(record["date_posted"])
 
-    logger.info("Term %s returned %s jobs", label, len(records))
-    return records
+    logger.info(
+        "Term %s returned %s jobs site_counts=%s",
+        label,
+        len(records),
+        site_counts,
+    )
+    return records, site_counts
 
 
 @router.get("/health")
@@ -72,12 +89,13 @@ async def search_jobs(
             "total_terms": total_terms,
             "has_more": False,
             "jobs": [],
+            "site_counts": _empty_site_counts(),
         }
 
     term = config.SEARCH_TERMS[page]
 
     try:
-        jobs = await asyncio.to_thread(
+        jobs, site_counts = await asyncio.to_thread(
             _scrape_term,
             term,
             results_wanted=config.RESULTS_WANTED,
@@ -92,6 +110,7 @@ async def search_jobs(
             "total_terms": total_terms,
             "has_more": page + 1 < total_terms,
             "jobs": [],
+            "site_counts": _empty_site_counts(),
         }
 
     return {
@@ -101,4 +120,5 @@ async def search_jobs(
         "total_terms": total_terms,
         "has_more": page + 1 < total_terms,
         "jobs": jobs,
+        "site_counts": site_counts,
     }
